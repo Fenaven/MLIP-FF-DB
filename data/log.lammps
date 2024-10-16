@@ -1,0 +1,130 @@
+LAMMPS (2 Aug 2023 - Update 3)
+units metal
+boundary p p p
+atom_style full
+read_data system.data
+Reading data file ...
+  orthogonal box = (0 0 0) to (62.4 62.4 62.4)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  14400 atoms
+  scanning bonds ...
+  4 = max bonds/atom
+  scanning angles ...
+  6 = max angles/atom
+  scanning dihedrals ...
+  9 = max dihedrals/atom
+  reading bonds ...
+  13680 bonds
+  reading angles ...
+  25920 angles
+  reading dihedrals ...
+  32400 dihedrals
+Finding 1-2 1-3 1-4 neighbors ...
+  special bond factors lj:    0        0        0       
+  special bond factors coul:  0        0        0       
+     4 = max # of 1-2 neighbors
+     6 = max # of 1-3 neighbors
+    12 = max # of 1-4 neighbors
+    16 = max # of special neighbors
+  special bonds CPU = 0.010 seconds
+  read_data CPU = 0.321 seconds
+
+pair_style lj/cut/coul/cut 11.0 11.0
+bond_style harmonic
+angle_style harmonic
+dihedral_style opls
+improper_style harmonic
+pair_modify mix geometric
+special_bonds lj/coul 0.0 0.0 0.5
+Finding 1-2 1-3 1-4 neighbors ...
+  special bond factors lj:    0        0        0.5     
+  special bond factors coul:  0        0        0.5     
+     4 = max # of 1-2 neighbors
+     6 = max # of 1-3 neighbors
+    12 = max # of 1-4 neighbors
+    16 = max # of special neighbors
+  special bonds CPU = 0.009 seconds
+
+include system.in.settings
+pair_coeff 1 1 0.066 3.5
+pair_coeff 2 2 0.066 3.5
+pair_coeff 3 3 0.03 2.5
+bond_coeff 1 268.0 1.529
+bond_coeff 2 340.0 1.09
+angle_coeff 1 58.35 112.7
+angle_coeff 2 33.0 107.8
+angle_coeff 3 37.5 110.7
+dihedral_coeff 1 1.3 -0.05 0.2 0.0
+dihedral_coeff 2 0.0 0.0 0.3 0.0
+dihedral_coeff 3 0.0 0.0 0.3 0.0
+set type 1 charge -0.18
+Setting atom values ...
+  1440 settings made for charge
+set type 2 charge -0.12
+Setting atom values ...
+  2880 settings made for charge
+set type 3 charge 0.06
+Setting atom values ...
+  10080 settings made for charge
+include system.in.charges
+set type 1 charge -0.18
+Setting atom values ...
+  1440 settings made for charge
+set type 2 charge -0.12
+Setting atom values ...
+  2880 settings made for charge
+set type 3 charge 0.06
+Setting atom values ...
+  10080 settings made for charge
+
+compute pe all pe/atom
+dump 1 all custom 1 methane.dump id type mass x y z fx fy fz c_pe
+dump_modify 1 sort id
+
+run 0
+WARNING: No fixes with time integration, atoms won't move (../verlet.cpp:60)
+Generated 3 of 3 mixed pair_coeff terms from geometric mixing rule
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 13
+  ghost atom cutoff = 13
+  binsize = 6.5, bins = 10 10 10
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair lj/cut/coul/cut, perpetual
+      attributes: half, newton on
+      pair build: half/bin/newton
+      stencil: half/bin/3d
+      bin: standard
+Per MPI rank memory allocation (min/avg/max) = 53.37 | 53.37 | 53.37 Mbytes
+   Step          Temp          E_pair         E_mol          TotEng         Press     
+         0   0             -2653.9125      1074.5953     -1579.3173     -64348.165    
+Loop time of 1.36e-06 on 1 procs for 0 steps with 14400 atoms
+
+220.6% CPU use with 1 MPI tasks x no OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0          | 0          | 0          |   0.0 |  0.00
+Bond    | 0          | 0          | 0          |   0.0 |  0.00
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0          | 0          | 0          |   0.0 |  0.00
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 1.36e-06   |            |       |100.00
+
+Nlocal:          14400 ave       14400 max       14400 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:          26927 ave       26927 max       26927 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:    3.87187e+06 ave 3.87187e+06 max 3.87187e+06 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 3871872
+Ave neighs/atom = 268.88
+Ave special neighs/atom = 10
+Neighbor list builds = 0
+Dangerous builds = 0
+Total wall time: 0:00:00
