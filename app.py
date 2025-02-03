@@ -349,7 +349,7 @@ def main():
     
         log_file = st.file_uploader("Загрузить log-файл", type=['out', 'cfg', 'log'])
         input_file = st.file_uploader("Загрузить input-файл", type=['inp', 'gjf'])
-        atomic_connectivity_file = st.file_uploader("Загрузить atomic connectivity", type=['xyz', 'pdb', 'out', 'log'])
+        atomic_connectivity_file = st.file_uploader("Загрузить atomic connectivity ", type=['xyz', 'pdb', 'out', 'log'])
 
         # --- загрузка лога в базу --- 
         if st.button('Загрузить'):
