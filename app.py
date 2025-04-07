@@ -4,11 +4,12 @@ import pandas as pd
 import utils
 import numpy as np
 import os
-import parsers
+from src.parsers import OrcaParser, LammpsParser, XYZParser, CFGParser
 from openbabel import pybel
 from rdkit import Chem
 
 from streamlit_ketcher import st_ketcher
+from src.ui.search_tab import render_search_tab
 
 
 software_lst = ['Orca', 'LAMMPS', 'VASP']
@@ -60,7 +61,6 @@ def test_insert() -> None:
         connection.commit()
         connection.close()
 
-# --- Далее все функции upload_ добавляют в таблицу данные
 
 def upload_calculation(calc_id: int, structure_id: int, total_energy: float, input_hash: str, program_id: str, 
                        date: str, server_name:str, scf_converged: bool, input_file_path: str, log_file_path: str, 
@@ -186,7 +186,6 @@ def upload_molecules(mol_id: int, coords: list):
 
     elements_lst = []
     
-    # Создаем временный xyz-файл в директории data_uploaded
     temp_xyz_path = f'data_uploaded/temp_structure_{mol_id}.xyz'
     
     try:
@@ -200,7 +199,6 @@ def upload_molecules(mol_id: int, coords: list):
                 else:
                     file.write(coord[0] + f' {coord[1]} {coord[2]} {coord[3]}\n')
 
-        # Конвертируем xyz в SMILES
         smi = xyz_to_smiles(temp_xyz_path)
         elements_unique = list(set(elements_lst))
         elements_str = ".".join(elements_unique)
@@ -285,14 +283,11 @@ def search_by_elements(elements: list) -> pd.DataFrame:
     connection = sqlite3.connect('main.db')
     cursor = connection.cursor()
     
-    # Преобразуем входные элементы в множество
     search_elements = set(elements)
     
-    # Получаем все молекулы
     cursor.execute("SELECT * FROM molecules")
     data = cursor.fetchall()
     
-    # Фильтруем результаты
     filtered_data = []
     for row in data:
         # Преобразуем строку элементов из БД в множество
@@ -449,18 +444,222 @@ def get_main_structures(substructure: str) -> list:
 
     return matches_lst
 
+def search_by_calculation_params(program: str = None, include_forces: bool = False) -> pd.DataFrame:
+    """
+    Поиск расчётов по программе и наличию сил
+    
+    Args:
+        program (str, optional): Название программы (Orca, LAMMPS, VASP)
+        include_forces (bool, optional): Включать ли расчёты с силами
+    
+    Returns:
+        pd.DataFrame: DataFrame с результатами поиска
+    """
+    connection = sqlite3.connect('main.db')
+    
+    program_id_map = {
+        'Orca': 100,
+        'LAMMPS': 200,
+        'VASP': 300
+    }
+    
+    query = """
+    SELECT c.calc_id, c.program_id, c.date, c.server_name, c.scf_converged, c.total_energy,
+           m.mol_id, m.SMILES as smiles
+    FROM computations c
+    LEFT JOIN molecules m ON c.structure_id = m.mol_id
+    WHERE 1=1
+    """
+    
+    params = []
+    
+    if program:
+        query += " AND c.program_id = ?"
+        params.append(program_id_map.get(program))
+    
+    if include_forces:
+        query += " AND EXISTS (SELECT 1 FROM atomic_properties ap WHERE ap.calc_id = c.calc_id AND ap.f_x IS NOT NULL)"
+    
+    # отладочная 
+    # st.write("Параметры поиска:")
+    # st.write(f"- Программа: {program} (program_id: {program_id_map.get(program) if program else None})")
+    # st.write(f"- Поиск с силами: {include_forces}")
+    # st.write("SQL запрос:")
+    # st.code(query)
+    # st.write("Параметры запроса:", params)
+    
+    # проверим содержимое таблицы computations
+    # all_computations = pd.read_sql_query("SELECT * FROM computations", connection)
+    # st.write("Все записи в таблице computations:")
+    # st.dataframe(all_computations)
+    
+    # if include_forces:
+    #     # Проверим таблицу atomic_properties
+    #     forces = pd.read_sql_query("SELECT * FROM atomic_properties", connection)
+    #     st.write("Записи в таблице atomic_properties:")
+    #     st.dataframe(forces)
+    
+    df = pd.read_sql_query(query, connection, params=params)
+    connection.close()
+    
+    return df
+
+def export_structures(calc_ids: list, format: str = 'xyz') -> str:
+    """
+    Экспортирует все выбранные структуры и их данные в выбранном формате
+    
+    Args:
+        calc_ids (list): Список ID расчётов
+        format (str): Формат файла (xyz, pdb, cfg)
+    
+    Returns:
+        str: Содержимое файла в выбранном формате
+    """
+    connection = sqlite3.connect('main.db')
+    
+    # Получаем данные о расчётах
+    calc_query = """
+    SELECT c.*, m.SMILES
+    FROM computations c
+    LEFT JOIN molecules m ON c.structure_id = m.mol_id
+    WHERE c.calc_id IN ({})
+    """.format(','.join('?' * len(calc_ids)))
+    
+    calc_df = pd.read_sql_query(calc_query, connection, params=calc_ids)
+    
+    # Получаем координаты 
+    atoms_query = """
+    SELECT a.*, c.calc_id
+    FROM atoms a
+    JOIN computations c ON a.str_id = c.structure_id
+    WHERE c.calc_id IN ({})
+    ORDER BY c.calc_id, a.atom_number
+    """.format(','.join('?' * len(calc_ids)))
+    
+    atoms_df = pd.read_sql_query(atoms_query, connection, params=calc_ids)
+    
+    # Получаем силы 
+    forces_query = """
+    SELECT ap.calc_id, ap.atom_id, ap.atom_number, ap.grade, ap.f_x, ap.f_y, ap.f_z
+    FROM atomic_properties ap
+    WHERE ap.calc_id IN ({})
+    ORDER BY ap.calc_id, ap.atom_number
+    """.format(','.join('?' * len(calc_ids)))
+    
+    forces_df = pd.read_sql_query(forces_query, connection, params=calc_ids)
+    
+    connection.close()
+    
+    if atoms_df.empty or calc_df.empty:
+        return None
+    
+    # отладка 
+    print("Columns in forces_df:", forces_df.columns.tolist())
+    print("Sample of forces_df:")
+    print(forces_df.head())
+    
+    content = ""
+    
+    if format == 'xyz':
+        for calc_id in calc_ids:
+            calc_data = calc_df[calc_df['calc_id'] == calc_id].iloc[0]
+            atoms_data = atoms_df[atoms_df['calc_id'] == calc_id]
+            forces_data = forces_df[forces_df['calc_id'] == calc_id] if not forces_df.empty else pd.DataFrame()
+            
+            content += f"{len(atoms_data)}\n"
+            content += f"Calculation ID: {calc_id}\n"
+            content += f"SMILES: {calc_data['SMILES']}\n"
+            content += f"Program: {calc_data['program_id']}\n"
+            content += f"Total Energy: {calc_data['total_energy']}\n"
+            content += f"SCF Converged: {calc_data['scf_converged']}\n"
+            content += f"Server: {calc_data['server_name']}\n"
+            content += f"Date: {calc_data['date']}\n"
+            content += "Coordinates and Forces:\n"
+            
+            for i, row in atoms_data.iterrows():
+                content += f"{row['element']} {row['x_coord']:.6f} {row['y_coord']:.6f} {row['z_coord']:.6f}"
+                if not forces_data.empty:
+                    force = forces_data[forces_data['atom_number'] == row['atom_number']]
+                    if not force.empty and not pd.isna(force['F_x'].iloc[0]):
+                        content += f" {force['F_x'].iloc[0]:.6f} {force['F_y'].iloc[0]:.6f} {force['F_z'].iloc[0]:.6f}"
+                content += "\n"
+            content += "\n"
+            
+    elif format == 'pdb':
+        for calc_id in calc_ids:
+            calc_data = calc_df[calc_df['calc_id'] == calc_id].iloc[0]
+            atoms_data = atoms_df[atoms_df['calc_id'] == calc_id]
+            forces_data = forces_df[forces_df['calc_id'] == calc_id] if not forces_df.empty else pd.DataFrame()
+            
+            content += f"TITLE     Calculation ID: {calc_id}\n"
+            content += f"REMARK    SMILES: {calc_data['SMILES']}\n"
+            content += f"REMARK    Program: {calc_data['program_id']}\n"
+            content += f"REMARK    Total Energy: {calc_data['total_energy']}\n"
+            content += f"REMARK    SCF Converged: {calc_data['scf_converged']}\n"
+            content += f"REMARK    Server: {calc_data['server_name']}\n"
+            content += f"REMARK    Date: {calc_data['date']}\n"
+            content += "MODEL     1\n"
+            
+            for i, row in atoms_data.iterrows():
+                content += f"ATOM  {(i+1):5d}  {row['element']:<3s} MOL     1    {row['x_coord']:8.3f}{row['y_coord']:8.3f}{row['z_coord']:8.3f}  1.00  0.00          {row['element']:>2s}\n"
+                if not forces_data.empty:
+                    force = forces_data[forces_data['atom_number'] == row['atom_number']]
+                    if not force.empty and not pd.isna(force['F_x'].iloc[0]):
+                        content += f"REMARK    Forces for atom {i+1}: {force['F_x'].iloc[0]:.6f} {force['F_y'].iloc[0]:.6f} {force['F_z'].iloc[0]:.6f}\n"
+            
+            content += "ENDMDL\n"
+            content += "END\n\n"
+            
+    elif format == 'cfg':
+        for calc_id in calc_ids:
+            calc_data = calc_df[calc_df['calc_id'] == calc_id].iloc[0]
+            atoms_data = atoms_df[atoms_df['calc_id'] == calc_id]
+            forces_data = forces_df[forces_df['calc_id'] == calc_id] if not forces_df.empty else pd.DataFrame()
+            
+            content += "BEGIN_CFG\n"
+            content += f"Size\n{len(atoms_data)}\n"
+            content += "Supercell\n"
+            content += "0.0 0 0\n"
+            content += "0 0.0 0\n"
+            content += "0 0 0.0\n"
+            
+            content += f"# Calculation ID: {calc_id}\n"
+            content += f"# SMILES: {calc_data['SMILES']}\n"
+            content += f"# Program: {calc_data['program_id']}\n"
+            content += f"# Total Energy: {calc_data['total_energy']}\n"
+            content += f"# SCF Converged: {calc_data['scf_converged']}\n"
+            content += f"# Server: {calc_data['server_name']}\n"
+            content += f"# Date: {calc_data['date']}\n"
+            
+            has_forces = not forces_data.empty and not forces_data['F_x'].isna().all()
+            content += "AtomData: id type cartes_x cartes_y cartes_z"
+            if has_forces:
+                content += " fx fy fz"
+            content += "\n"
+            
+            for i, row in atoms_data.iterrows():
+                content += f"{i+1} {row['element']} {row['x_coord']:.6f} {row['y_coord']:.6f} {row['z_coord']:.6f}"
+                if has_forces:
+                    force = forces_data[forces_data['atom_number'] == row['atom_number']]
+                    if not force.empty and not pd.isna(force['F_x'].iloc[0]):
+                        content += f" {force['F_x'].iloc[0]:.6f} {force['F_y'].iloc[0]:.6f} {force['F_z'].iloc[0]:.6f}"
+                content += "\n"
+            
+            content += f"Energy\n{calc_data['total_energy']}\n"
+            content += "END_CFG\n\n"
+    
+    return content
 
 def main():
-    # test_insert()
-
     try:
         os.mkdir('data_uploaded')
     except:
         pass
-
-    # --- streamlit app ---
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(['Импорт', 'Таблица расчетов', 'Таблица программ', 'Таблица атомных свойств', 
-                                            'Таблица атомов', 'Таблица молекул', 'Редактор', 'Поиск'])
+    
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+        'Импорт', 'Таблица расчетов', 'Таблица программ', 'Таблица атомных свойств', 
+        'Таблица атомов', 'Таблица молекул', 'Редактор', 'Поиск по молекулам', 'Поиск по параметрам'
+    ])
     
     with tab1:
         st.title('Импорт log-файлов')
@@ -471,71 +670,141 @@ def main():
         version_selected_option = col2.selectbox(f"Выберите версию {software_selected_option}",
                                                software_version_dict[software_selected_option])
         
-        server_selected_option = col3.selectbox("Выберите программу", server_lst)
+        server_selected_option = col3.selectbox("Выберите сервер", server_lst)
     
-        log_file = st.file_uploader("Загрузить log-файл", type=['out', 'cfg', 'log'])
+        log_file = st.file_uploader("Загрузить log-файл", type=['out', 'cfg', 'log', 'dump'])
         input_file = st.file_uploader("Загрузить input-файл", type=['inp', 'gjf'])
-        atomic_connectivity_file = st.file_uploader("Загрузить atomic connectivity ", type=['xyz', 'pdb', 'out', 'log'])
+        atomic_connectivity_file = st.file_uploader("Загрузить atomic connectivity", type=['xyz', 'pdb', 'out', 'log'])
 
-        # --- загрузка лога в базу --- 
         if st.button('Загрузить'):
-            new_index = get_last_calcid() + 1
-            new_index_strid = get_last_strid() + 1
-            new_index_molid = get_last_molid() + 1
+            try:
+                new_index = get_last_calcid() + 1
+                new_index_strid = get_last_strid() + 1
+                new_index_molid = get_last_molid() + 1
 
-            input_file_path = f'data_uploaded/id_{new_index}.inp'
-            log_file_path = f'data_uploaded/id_{new_index}.log'
-            atomic_connectivity_file_path = f'data_uploaded/id_{new_index}.txt'
+                # Создаем пути к файлам
+                log_file_path = f'data_uploaded/id_{new_index}.log'
+                dump_file_path = f'data_uploaded/id_{new_index}.dump'
+                input_file_path = f'data_uploaded/id_{new_index}.inp'
+                xyz_file_path = f'data_uploaded/id_{new_index}.xyz'
 
-            for file_path, file in zip([input_file_path, log_file_path, atomic_connectivity_file_path],
-                                           [input_file, log_file, atomic_connectivity_file]):
-                with open(file_path, 'wb') as f:
-                    f.write(file.getvalue())
+                # Проверяем наличие необходимых файлов
+                if software_selected_option == 'Orca':
+                    if not input_file or not log_file:
+                        st.error("Для Orca необходимы input и log файлы")
+                        return
+                elif software_selected_option == 'LAMMPS':
+                    if not log_file or not atomic_connectivity_file:
+                        st.error("Для LAMMPS необходимы log и dump файлы")
+                        return
 
-            if software_selected_option == 'Orca':
-                parser = parsers.ParserORCA(input_file_path=input_file_path, log_file_path=log_file_path)
-            else:
-                pass
+                # Сохраняем файлы в зависимости от выбранной программы
+                if software_selected_option == 'Orca':
+                    with open(input_file_path, 'wb') as f:
+                        f.write(input_file.getvalue())
+                    with open(log_file_path, 'wb') as f:
+                        f.write(log_file.getvalue())
+                    if atomic_connectivity_file:
+                        with open(xyz_file_path, 'wb') as f:
+                            f.write(atomic_connectivity_file.getvalue())
+                elif software_selected_option == 'LAMMPS':
+                    with open(log_file_path, 'wb') as f:
+                        f.write(log_file.getvalue())
+                    with open(dump_file_path, 'wb') as f:
+                        f.write(atomic_connectivity_file.getvalue())
 
-            parsed_data_dict = parser.get_summary()
-            st.text(parsed_data_dict)
-            print(new_index)
+                # Создаем парсер в зависимости от программы
+                parser = None
+                try:
+                    if software_selected_option == 'Orca':
+                        parser = OrcaParser(input_file_path, log_file_path)
+                    elif software_selected_option == 'LAMMPS':
+                        parser = LammpsParser(log_file_path, dump_file_path)
+                    elif software_selected_option == 'VASP':
+                        st.error("Поддержка VASP пока не реализована")
+                        return
+                except Exception as e:
+                    st.error(f"Ошибка при создании парсера: {str(e)}")
+                    return
 
-            # --- ОБНОВЛЕНИЕ ТАБЛИЦ ---
+                if parser:
+                    try:
+                        data = parser.get_data()
+                        
+                        program_id_map = {
+                            'Orca': 100,
+                            'LAMMPS': 200,
+                            'VASP': 300
+                        }
 
-            upload_calculation(calc_id=new_index, structure_id=new_index_strid, total_energy=parsed_data_dict['total_energy'], input_hash=parsed_data_dict['input_hash'], 
-                               program_id=100, date='19.03.2025', server_name=server_selected_option, scf_converged=parsed_data_dict['scf_convergence'],
-                               input_file_path=input_file_path, log_file_path=log_file_path, atomic_file_path=atomic_connectivity_file_path)
-            
-            upload_molecules(new_index_molid, parsed_data_dict['coords'])
+                        # Определяем пути к файлам для загрузки в БД
+                        input_path = input_file_path if software_selected_option == 'Orca' else None
+                        atomic_path = xyz_file_path if software_selected_option == 'Orca' else dump_file_path
 
-            for i in range(len(parsed_data_dict['forces'])):
-                forces_per_atom_lst = parsed_data_dict['forces'][i]
-                coords_per_atom_lst = parsed_data_dict['coords'][i]
+                        upload_calculation(
+                            calc_id=new_index,
+                            structure_id=new_index_strid,
+                            total_energy=data.get('energy', 0.0),
+                            input_hash='',  # TODO: добавить хеширование
+                            program_id=program_id_map[software_selected_option],
+                            date='19.03.2025',
+                            server_name=server_selected_option,
+                            scf_converged=True if software_selected_option != 'Orca' else parser.get_scf_convergence(),
+                            input_file_path=input_path,
+                            log_file_path=log_file_path,
+                            atomic_file_path=atomic_path
+                        )
 
-                upload_atomic_properties(calc_id=new_index, atom_number=i+1, grade=None, f_x=forces_per_atom_lst[0],
-                                         f_y=forces_per_atom_lst[1], f_z=forces_per_atom_lst[2])
-                
-                upload_atoms(str_id=new_index_strid, atom_number=i+1, element=coords_per_atom_lst[0], x_coord=coords_per_atom_lst[1],
-                             y_coord=coords_per_atom_lst[2], z_coord=coords_per_atom_lst[3])
-                
-            st.text(f'Файл загружен и сохранен в БД, calc_id={new_index}')
+                        coords = data.get('coordinates', [])
+                        forces = data.get('forces')
+                        elements = data.get('elements', [])
+
+                        if not coords or not elements or len(coords) != len(elements):
+                            st.error("Ошибка: некорректные данные о координатах или элементах")
+                            return
+
+                        for i, (element, coord) in enumerate(zip(elements, coords)):
+                            upload_atoms(
+                                str_id=new_index_strid,
+                                atom_number=i+1,
+                                element=element,
+                                x_coord=coord[0],
+                                y_coord=coord[1],
+                                z_coord=coord[2]
+                            )
+
+                            if forces and i < len(forces):
+                                force = forces[i]
+                                upload_atomic_properties(
+                                    calc_id=new_index,
+                                    atom_number=i+1,
+                                    grade=None,
+                                    f_x=force[0],
+                                    f_y=force[1],
+                                    f_z=force[2]
+                                )
+
+                        st.success(f'Файл загружен и сохранен в БД, calc_id={new_index}')
+                    except Exception as e:
+                        st.error(f"Ошибка при обработке данных: {str(e)}")
+            except Exception as e:
+                st.error(f"Общая ошибка: {str(e)}")
 
 
     with tab2:
-        st.dataframe(get_table('computations'))
+        st.dataframe(get_table('computations'), use_container_width=True)
 
     with tab3:
-        st.dataframe(get_table('programs'))
+        st.dataframe(get_table('programs'), use_container_width=True)
 
     with tab4:
-        st.dataframe(get_table('atomic_properties'))
+        st.dataframe(get_table('atomic_properties'), use_container_width=True)
 
     with tab5:
-        st.dataframe(get_table('atoms'))
+        st.dataframe(get_table('atoms'), use_container_width=True)
 
     with tab6:
-        st.dataframe(get_table('molecules'))
+        st.dataframe(get_table('molecules'), use_container_width=True)
 
     with tab7:
         molecule = st.text_input("Molecule", "CCO")
@@ -548,7 +817,7 @@ def main():
             st.text(get_main_structures(substructure=substructure_smiles))
 
     with tab8:
-        st.title('Поиск по базе данных')
+        st.title('Поиск по молекулам')
         
         search_type = st.selectbox(
             "Выберите тип поиска",
@@ -562,7 +831,7 @@ def main():
             
             if st.button("Найти"):
                 results = search_by_energy(min_energy, max_energy)
-                st.dataframe(results)
+                st.dataframe(results, use_container_width=True)
                 
         elif search_type == "Поиск по элементам":
             elements = st.text_input("Введите элементы через запятую (например: C,H,O)")
@@ -571,7 +840,6 @@ def main():
                 elements_list = list(filter(None, elements_list))
                 elements_list = list(dict.fromkeys(elements_list))
                 
-                # Показываем пользователю, что ищем
                 st.write(f"Поиск молекул, содержащих только элементы: {', '.join(elements_list)}")
                 
                 results = search_by_elements(elements_list)
@@ -580,13 +848,16 @@ def main():
                     st.warning("Молекулы с таким набором элементов не найдены")
                 else:
                     st.success(f"Найдено молекул: {len(results)}")
-                    st.dataframe(results)
+                    st.dataframe(results, use_container_width=True)
                 
         else:  # Поиск по подструктуре
             substructure = st.text_input("Введите SMILES-код подструктуры")
             if st.button("Найти"):
                 results = search_by_substructure(substructure)
-                st.dataframe(results)
+                st.dataframe(results, use_container_width=True)
+    
+    with tab9:
+        render_search_tab()
 
 
 if __name__ == '__main__':
