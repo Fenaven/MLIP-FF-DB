@@ -20,13 +20,24 @@ software_version_dict = {'Orca': ['5.0.0', '6.0.0'],
 server_lst = ['Server1', 'Server2', 'Server3']
 
 def xyz_to_smiles(fname: str) -> str: 
-     
+    """Конвертирует XYZ-файл в SMILES-код
+
+    Args:
+        fname (str): Путь к XYZ-файлу
+
+    Returns:
+        str: SMILES-код молекулы
+    """
+    try:
         mol = next(pybel.readfile("xyz", fname)) 
- 
+        
         smi = mol.write(format="can") 
         print(smi)
     
         return smi.split()[0].strip()
+    except Exception as e:
+        print(f"Ошибка при конвертации XYZ в SMILES: {e}")
+        return ""
 
 
 def test_insert() -> None:
@@ -174,25 +185,35 @@ def upload_molecules(mol_id: int, coords: list):
     cursor = connection.cursor()
 
     elements_lst = []
+    
+    # Создаем временный xyz-файл в директории data_uploaded
+    temp_xyz_path = f'data_uploaded/temp_structure_{mol_id}.xyz'
+    
+    try:
+        with open(temp_xyz_path, 'w') as file:
+            file.write(f'{len(coords)}\n')
+            file.write('\n')
+            for coord in coords:
+                elements_lst.append(coord[0])
+                if coords.index(coord) == len(coords) - 1:
+                    file.write(coord[0] + f' {coord[1]} {coord[2]} {coord[3]}')
+                else:
+                    file.write(coord[0] + f' {coord[1]} {coord[2]} {coord[3]}\n')
 
-    with open('test_structure.xyz', 'w') as file:
-        file.write(f'{len(coords)}\n')
-        file.write('\n')
-        for coord in coords:
-            elements_lst.append(coord[0])
-            if coords.index(coord) == len(coords) - 1:
-                file.write(coord[0] + f' {coord[1]} {coord[2]} {coord[3]}')
-            else:
-                file.write(coord[0] + f' {coord[1]} {coord[2]} {coord[3]}\n')
+        # Конвертируем xyz в SMILES
+        smi = xyz_to_smiles(temp_xyz_path)
+        elements_unique = list(set(elements_lst))
+        elements_str = ".".join(elements_unique)
 
-    smi = xyz_to_smiles("test_structure.xyz") 
-    elements_unique = list(set(elements_lst))
-    elements_str = ".".join(elements_unique)
+        cursor.execute(insert_prompt, (mol_id, smi, elements_str, None))
 
-    cursor.execute(insert_prompt, (mol_id, smi, elements_str, None))
-
-    connection.commit()
-    connection.close()
+        connection.commit()
+        
+    finally:
+        # Удаляем временный файл
+        # if os.path.exists(temp_xyz_path):
+        #     os.remove(temp_xyz_path)
+        connection.close()
 
 
 def get_table(table_type: str) -> pd.DataFrame:
@@ -216,6 +237,111 @@ def get_table(table_type: str) -> pd.DataFrame:
     connection.commit()
     connection.close()
      
+    return df
+
+def search_by_energy(min_energy: float = None, max_energy: float = None) -> pd.DataFrame:
+    """Поиск расчетов по диапазону энергии
+
+    Args:
+        min_energy (float, optional): Минимальная энергия. Defaults to None.
+        max_energy (float, optional): Максимальная энергия. Defaults to None.
+
+    Returns:
+        pd.DataFrame: Результаты поиска
+    """
+    connection = sqlite3.connect('main.db')
+    cursor = connection.cursor()
+
+    query = "SELECT * FROM computations WHERE 1=1"
+    params = []
+
+    if min_energy is not None:
+        query += " AND total_energy >= ?"
+        params.append(min_energy)
+    
+    if max_energy is not None:
+        query += " AND total_energy <= ?"
+        params.append(max_energy)
+
+    cursor.execute(query, params)
+    data = cursor.fetchall()
+
+    column_names = [desc[0] for desc in cursor.description]
+    df = pd.DataFrame(data, columns=column_names)
+
+    connection.close()
+    return df
+
+def search_by_elements(elements: list) -> pd.DataFrame:
+    """Поиск молекул по химическим элементам
+
+    Args:
+        elements (list): Список элементов для поиска. 
+            Находит все молекулы, содержащие перечисленные элементы, перечисленные в любом порядке.
+
+    Returns:
+        pd.DataFrame: Результаты поиска
+    """
+    connection = sqlite3.connect('main.db')
+    cursor = connection.cursor()
+    
+    # Преобразуем входные элементы в множество
+    search_elements = set(elements)
+    
+    # Получаем все молекулы
+    cursor.execute("SELECT * FROM molecules")
+    data = cursor.fetchall()
+    
+    # Фильтруем результаты
+    filtered_data = []
+    for row in data:
+        # Преобразуем строку элементов из БД в множество
+        mol_elements = set(row[2].split('.'))
+        # Проверяем, содержит ли молекула все искомые элементы
+        if search_elements.issubset(mol_elements):
+            filtered_data.append(row)
+
+    column_names = [desc[0] for desc in cursor.description]
+    df = pd.DataFrame(filtered_data, columns=column_names)
+
+    connection.close()
+    return df
+
+def search_by_substructure(substructure_smiles: str) -> pd.DataFrame:
+    """Поиск молекул по подструктуре
+
+    Args:
+        substructure_smiles (str): SMILES-код подструктуры
+
+    Returns:
+        pd.DataFrame: Результаты поиска
+    """
+    connection = sqlite3.connect('main.db')
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT * FROM molecules")
+    molecules = cursor.fetchall()
+
+    results = []
+    substructure_mol = Chem.MolFromSmiles(substructure_smiles, sanitize=False)
+
+    for mol_id, smiles, elements, names in molecules:
+        if '.' in smiles:
+            mol_parts = smiles.split('.')
+            for part in mol_parts:
+                main_mol = Chem.MolFromSmiles(part, sanitize=False)
+                if main_mol and main_mol.HasSubstructMatch(substructure_mol):
+                    results.append((mol_id, smiles, elements, names))
+                    break
+        else:
+            main_mol = Chem.MolFromSmiles(smiles, sanitize=False)
+            if main_mol and main_mol.HasSubstructMatch(substructure_mol):
+                results.append((mol_id, smiles, elements, names))
+
+    column_names = ['mol_id', 'SMILES', 'elements', 'names']
+    df = pd.DataFrame(results, columns=column_names)
+
+    connection.close()
     return df
 
 def get_last_calcid() -> int:
@@ -333,8 +459,8 @@ def main():
         pass
 
     # --- streamlit app ---
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(['Импорт', 'Таблица расчетов', 'Таблица программ', 'Таблица атомных свойств', 
-                                            'Таблица атомов', 'Таблица молекул', 'Редактор'])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(['Импорт', 'Таблица расчетов', 'Таблица программ', 'Таблица атомных свойств', 
+                                            'Таблица атомов', 'Таблица молекул', 'Редактор', 'Поиск'])
     
     with tab1:
         st.title('Импорт log-файлов')
@@ -420,6 +546,47 @@ def main():
 
         if st.button('Check'):
             st.text(get_main_structures(substructure=substructure_smiles))
+
+    with tab8:
+        st.title('Поиск по базе данных')
+        
+        search_type = st.selectbox(
+            "Выберите тип поиска",
+            ["Поиск по энергии", "Поиск по элементам", "Поиск по подструктуре"]
+        )
+        
+        if search_type == "Поиск по энергии":
+            col1, col2 = st.columns(2)
+            min_energy = col1.number_input("Минимальная энергия", value=-400.0)
+            max_energy = col2.number_input("Максимальная энергия", value=-200.0)
+            
+            if st.button("Найти"):
+                results = search_by_energy(min_energy, max_energy)
+                st.dataframe(results)
+                
+        elif search_type == "Поиск по элементам":
+            elements = st.text_input("Введите элементы через запятую (например: C,H,O)")
+            if st.button("Найти"):
+                elements_list = [e.strip().upper() for e in elements.split(",")]
+                elements_list = list(filter(None, elements_list))
+                elements_list = list(dict.fromkeys(elements_list))
+                
+                # Показываем пользователю, что ищем
+                st.write(f"Поиск молекул, содержащих только элементы: {', '.join(elements_list)}")
+                
+                results = search_by_elements(elements_list)
+                
+                if len(results) == 0:
+                    st.warning("Молекулы с таким набором элементов не найдены")
+                else:
+                    st.success(f"Найдено молекул: {len(results)}")
+                    st.dataframe(results)
+                
+        else:  # Поиск по подструктуре
+            substructure = st.text_input("Введите SMILES-код подструктуры")
+            if st.button("Найти"):
+                results = search_by_substructure(substructure)
+                st.dataframe(results)
 
 
 if __name__ == '__main__':
