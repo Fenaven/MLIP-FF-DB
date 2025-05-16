@@ -405,7 +405,7 @@ def get_last_molid() -> int:
     return last_score
 
 def get_main_structures(substructure: str) -> list:
-    # TODO: переписать с зарядами
+    # TODO: переписать с зарядами / снести? 
     connection = sqlite3.connect('main.db')
     cursor = connection.cursor()
 
@@ -488,13 +488,11 @@ def search_by_calculation_params(program: str = None, include_forces: bool = Fal
     # st.code(query)
     # st.write("Параметры запроса:", params)
     
-    # проверим содержимое таблицы computations
     # all_computations = pd.read_sql_query("SELECT * FROM computations", connection)
     # st.write("Все записи в таблице computations:")
     # st.dataframe(all_computations)
     
     # if include_forces:
-    #     # Проверим таблицу atomic_properties
     #     forces = pd.read_sql_query("SELECT * FROM atomic_properties", connection)
     #     st.write("Записи в таблице atomic_properties:")
     #     st.dataframe(forces)
@@ -517,7 +515,6 @@ def export_structures(calc_ids: list, format: str = 'xyz') -> str:
     """
     connection = sqlite3.connect('main.db')
     
-    # Получаем данные о расчётах
     calc_query = """
     SELECT c.*, m.SMILES
     FROM computations c
@@ -527,7 +524,6 @@ def export_structures(calc_ids: list, format: str = 'xyz') -> str:
     
     calc_df = pd.read_sql_query(calc_query, connection, params=calc_ids)
     
-    # Получаем координаты 
     atoms_query = """
     SELECT a.*, c.calc_id
     FROM atoms a
@@ -682,13 +678,11 @@ def main():
                 new_index_strid = get_last_strid() + 1
                 new_index_molid = get_last_molid() + 1
 
-                # Создаем пути к файлам
                 log_file_path = f'data_uploaded/id_{new_index}.log'
                 dump_file_path = f'data_uploaded/id_{new_index}.dump'
                 input_file_path = f'data_uploaded/id_{new_index}.inp'
                 xyz_file_path = f'data_uploaded/id_{new_index}.xyz'
 
-                # Проверяем наличие необходимых файлов
                 if software_selected_option == 'Orca':
                     if not input_file or not log_file:
                         st.error("Для Orca необходимы input и log файлы")
@@ -698,7 +692,6 @@ def main():
                         st.error("Для LAMMPS необходимы log и dump файлы")
                         return
 
-                # Сохраняем файлы в зависимости от выбранной программы
                 if software_selected_option == 'Orca':
                     with open(input_file_path, 'wb') as f:
                         f.write(input_file.getvalue())
@@ -713,7 +706,6 @@ def main():
                     with open(dump_file_path, 'wb') as f:
                         f.write(atomic_connectivity_file.getvalue())
 
-                # Создаем парсер в зависимости от программы
                 parser = None
                 try:
                     if software_selected_option == 'Orca':
@@ -737,7 +729,6 @@ def main():
                             'VASP': 300
                         }
 
-                        # Определяем пути к файлам для загрузки в БД
                         input_path = input_file_path if software_selected_option == 'Orca' else None
                         atomic_path = xyz_file_path if software_selected_option == 'Orca' else dump_file_path
 
@@ -821,19 +812,10 @@ def main():
         
         search_type = st.selectbox(
             "Выберите тип поиска",
-            ["Поиск по энергии", "Поиск по элементам", "Поиск по подструктуре"]
+            ["Поиск по элементам", "Поиск по подструктуре"]
         )
-        
-        if search_type == "Поиск по энергии":
-            col1, col2 = st.columns(2)
-            min_energy = col1.number_input("Минимальная энергия", value=-400.0)
-            max_energy = col2.number_input("Максимальная энергия", value=-200.0)
-            
-            if st.button("Найти"):
-                results = search_by_energy(min_energy, max_energy)
-                st.dataframe(results, use_container_width=True)
                 
-        elif search_type == "Поиск по элементам":
+        if search_type == "Поиск по элементам":
             elements = st.text_input("Введите элементы через запятую (например: C,H,O)")
             if st.button("Найти"):
                 elements_list = [e.strip().upper() for e in elements.split(",")]
@@ -850,7 +832,7 @@ def main():
                     st.success(f"Найдено молекул: {len(results)}")
                     st.dataframe(results, use_container_width=True)
                 
-        else:  # Поиск по подструктуре
+        else:
             substructure = st.text_input("Введите SMILES-код подструктуры")
             if st.button("Найти"):
                 results = search_by_substructure(substructure)

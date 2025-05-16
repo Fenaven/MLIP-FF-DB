@@ -43,10 +43,6 @@
 ### Примеры использования:
 
 ```bash
-# Поиск по энергии
-./search_db.py --type energy \
-               --min-energy -400.0 \
-               --max-energy -200.0
 # Поиск по элементам
 ./search_db.py --type elements \
                --elements C,H,O
@@ -95,5 +91,3 @@
 В директории `data` находятся тестовые файлы:
 - `input.inp`: Тестовый input-файл для Orca
 - `butane_cut.log`: Тестовый log-файл для Orca
-
-Эти файлы можно использовать для проверки работы скриптов. 

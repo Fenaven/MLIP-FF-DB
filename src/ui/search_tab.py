@@ -10,11 +10,9 @@ def render_search_tab():
     
     st.header("Поиск по параметрам расчёта")
     
-    # Инициализируем session_state для хранения результатов поиска
     if 'search_results' not in st.session_state:
         st.session_state.search_results = None
     
-    # Используем columns для разделения интерфейса на секции
     search_col, results_col = st.columns([1, 2])
     
     with search_col:
@@ -47,10 +45,8 @@ def render_search_tab():
                 st.dataframe(st.session_state.search_results, use_container_width=True)
                 st.success(f"Найдено расчётов: {len(st.session_state.search_results)}")
                 
-                # Добавляем кнопки экспорта для всех форматов
                 st.subheader("Экспорт всех найденных структур")
                 
-                # Используем columns для размещения кнопок в ряд
                 col1, col2, col3 = st.columns(3)
                 
                 calc_ids = st.session_state.search_results['calc_id'].tolist()
@@ -60,10 +56,10 @@ def render_search_tab():
                         content = export_structures(calc_ids, 'xyz')
                         if content:
                             st.download_button(
-                                label="Скачать .xyz",
+                                label="Скачать .zip (XYZ)",
                                 data=content,
-                                file_name=f"structures.xyz",
-                                mime="text/plain",
+                                file_name=f"structures_xyz.zip",
+                                mime="application/zip",
                                 use_container_width=True
                             )
                 
@@ -72,10 +68,10 @@ def render_search_tab():
                         content = export_structures(calc_ids, 'pdb')
                         if content:
                             st.download_button(
-                                label="Скачать .pdb",
+                                label="Скачать .zip (PDB)",
                                 data=content,
-                                file_name=f"structures.pdb",
-                                mime="text/plain",
+                                file_name=f"structures_pdb.zip",
+                                mime="application/zip",
                                 use_container_width=True
                             )
                 
@@ -84,10 +80,10 @@ def render_search_tab():
                         content = export_structures(calc_ids, 'cfg')
                         if content:
                             st.download_button(
-                                label="Скачать .cfg",
+                                label="Скачать .zip (CFG)",
                                 data=content,
-                                file_name=f"structures.cfg",
-                                mime="text/plain",
+                                file_name=f"structures_cfg.zip",
+                                mime="application/zip",
                                 use_container_width=True
                             )
             else:
@@ -110,21 +106,17 @@ def search_by_calculation_params(program: Optional[str] = None, include_forces: 
         'VASP': 300
     }
     
-    # Получаем данные из базы
     computations = get_table('computations')
     molecules = get_table('molecules')
     
-    # Фильтруем по программе
     if program:
         computations = computations[computations['program_id'] == program_id_map[program]]
     
-    # Фильтруем по наличию сил
     if include_forces:
         atomic_properties = get_table('atomic_properties')
         calc_ids_with_forces = atomic_properties[atomic_properties['F_x'].notna()]['calc_id'].unique()
         computations = computations[computations['calc_id'].isin(calc_ids_with_forces)]
     
-    # Объединяем с данными о молекулах
     result = pd.merge(
         computations,
         molecules[['mol_id', 'SMILES']],

@@ -37,14 +37,11 @@ def main():
     args = parser.parse_args()
 
     try:
-        # Получаем данные из таблицы
         df = get_table(args.table)
         
-        # Применяем лимит, если указан
         if args.limit:
             df = df.head(args.limit)
         
-        # Выводим результаты
         if args.output == 'csv':
             output_file = f'{args.table}.csv'
             df.to_csv(output_file, index=False)

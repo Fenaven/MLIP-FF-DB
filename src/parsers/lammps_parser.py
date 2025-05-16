@@ -57,7 +57,7 @@ class LammpsParser(BaseParser):
                         print(f"Ошибка при чтении границ ячейки: {e}")
                 
                 elif line.startswith('ITEM: ATOMS'):
-                    headers = line.split()[2:]  # Пропускаем 'ITEM:' и 'ATOMS'
+                    headers = line.split()[2:]
                     i += 1
                     while i < len(lines):
                         line = lines[i].strip()
@@ -161,5 +161,4 @@ class LammpsParser(BaseParser):
             raise
 
     def get_scf_convergence(self) -> bool:
-        """LAMMPS всегда сходится, если выполнился до конца"""
         return True 

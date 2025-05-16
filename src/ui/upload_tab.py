@@ -28,7 +28,6 @@ def render_upload_tab():
     """Отображает вкладку загрузки файлов"""
     st.title('Импорт файлов расчётов')
     
-    # Выбор программы и версии
     col1, col2, col3 = st.columns(3)
     
     software_lst = ['Orca', 'LAMMPS']
@@ -50,7 +49,6 @@ def render_upload_tab():
     with col3:
         server = st.selectbox("Выберите сервер", server_lst)
     
-    # Загрузка файлов в зависимости от программы
     if program == 'Orca':
         input_file = st.file_uploader("Загрузить input файл", type=['inp'])
         output_file = st.file_uploader("Загрузить output файл", type=['out', 'log'])
@@ -61,7 +59,6 @@ def render_upload_tab():
                 st.error("Необходимо загрузить input и output файлы")
                 return
             
-            # Сохраняем файлы
             calc_id = get_last_calcid() + 1
             str_id = get_last_strid() + 1
             mol_id = get_last_molid() + 1
@@ -72,11 +69,9 @@ def render_upload_tab():
             if xyz_file:
                 xyz_path = save_uploaded_file('data_uploaded', f'id_{calc_id}.xyz', xyz_file)
             
-            # Парсим файлы
             parser = OrcaParser(input_path, output_path)
             data = parser.get_data()
             
-            # Загружаем данные в БД
             upload_calculation(
                 calc_id=calc_id,
                 structure_id=str_id,
@@ -91,7 +86,6 @@ def render_upload_tab():
                 atomic_file_path=xyz_path or ''
             )
             
-            # Загружаем координаты и силы
             coords = data['coordinates']
             forces = data['forces']
             elements = data['elements']
@@ -129,7 +123,6 @@ def render_upload_tab():
                 st.error("Необходимо загрузить log и dump файлы")
                 return
             
-            # Сохраняем файлы
             calc_id = get_last_calcid() + 1
             str_id = get_last_strid() + 1
             mol_id = get_last_molid() + 1
@@ -140,11 +133,9 @@ def render_upload_tab():
             if cfg_file:
                 cfg_path = save_uploaded_file('data_uploaded', f'id_{calc_id}.cfg', cfg_file)
             
-            # Парсим файлы
             parser = LammpsParser(dump_path, log_path)
             data = parser.get_data()
             
-            # Загружаем данные в БД
             upload_calculation(
                 calc_id=calc_id,
                 structure_id=str_id,
@@ -159,7 +150,6 @@ def render_upload_tab():
                 atomic_file_path=cfg_path or ''
             )
             
-            # Загружаем координаты и силы
             coords = data['coordinates']
             forces = data['forces']
             elements = data['elements']

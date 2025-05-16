@@ -31,18 +31,15 @@ def main():
         print(f"Ошибка при создании директории: {e}")
         return
 
-    # Получаем новые индексы
     new_index = get_last_calcid() + 1
     new_index_strid = get_last_strid() + 1
     new_index_molid = get_last_molid() + 1
 
-    # Копируем файлы в директорию data_uploaded
     input_file_path = f'data_uploaded/id_{new_index}.inp'
     log_file_path = f'data_uploaded/id_{new_index}.log'
     atomic_connectivity_file_path = f'data_uploaded/id_{new_index}.txt'
 
     try:
-        # Копируем файлы
         for src, dst in [(args.input, input_file_path),
                          (args.log, log_file_path),
                          (args.atomic, atomic_connectivity_file_path)]:
@@ -52,7 +49,6 @@ def main():
         print(f"Ошибка при копировании файлов: {e}")
         return
 
-    # Парсим данные в зависимости от программы
     if args.program == 'Orca':
         parser = ParserORCA(input_file_path=input_file_path, log_file_path=log_file_path)
     else:
@@ -62,9 +58,7 @@ def main():
     parsed_data_dict = parser.get_summary()
     print(f"Данные успешно распарсены: {parsed_data_dict}")
 
-    # Загружаем данные в базу
     try:
-        # Загружаем основные данные расчета
         upload_calculation(
             calc_id=new_index,
             structure_id=new_index_strid,
@@ -79,10 +73,8 @@ def main():
             atomic_file_path=atomic_connectivity_file_path
         )
 
-        # Загружаем данные о молекуле
         upload_molecules(new_index_molid, parsed_data_dict['coords'])
 
-        # Загружаем атомные свойства и координаты
         for i in range(len(parsed_data_dict['forces'])):
             forces_per_atom_lst = parsed_data_dict['forces'][i]
             coords_per_atom_lst = parsed_data_dict['coords'][i]
