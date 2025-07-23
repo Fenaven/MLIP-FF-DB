@@ -135,8 +135,13 @@ class ParserORCA(Parser):
         forces = self.__parse_forces()
         coords = self.__parse_atomic_coordinates()
 
-        data_dict = {'input_hash': input_hash, 'total_energy': energy, 'scf_convergence': scf_conv, 'forces': forces,
-                     'coords': coords}
+        data_dict = {
+            'input_hash': input_hash,
+            'total_energy': energy,
+            'scf_convergence': scf_conv,
+            'forces': forces,
+            'coords': coords,
+        }
 
         return data_dict
 
